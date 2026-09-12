@@ -59,7 +59,7 @@
     <h1 id="title">Join the Wheel</h1>
     <p class="sub" id="sub">Enter your name to appear on the wheel.</p>
     <form id="form">
-      <input id="name" type="text" placeholder="Your name" maxlength="30"
+      <input id="name" type="text" placeholder="Your name" maxlength="50"
              autocomplete="off" autofocus required>
       <button id="submit" type="submit">Join</button>
     </form>
@@ -103,7 +103,7 @@
       e.preventDefault();
       const name = nameInput.value.trim();
       if (!name) { setMsg('Please enter a name.', 'error'); return; }
-      if (name.length > 30) { setMsg('Name is too long (max 30).', 'error'); return; }
+      if (name.length > 50) { setMsg('Name is too long (max 50).', 'error'); return; }
 
       submitBtn.disabled = true;
       setMsg('Joining…', '');

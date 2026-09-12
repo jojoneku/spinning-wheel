@@ -3,7 +3,7 @@
 
 "use strict";
 
-const MAX_NAME_LENGTH = 30;
+const MAX_NAME_LENGTH = 50;
 
 // --- Pure validation / shaping (unit-testable, no AWS) ---
 
@@ -14,6 +14,18 @@ function validateName(raw) {
   if (name.length > MAX_NAME_LENGTH)
     return { ok: false, error: `name must be <= ${MAX_NAME_LENGTH} chars` };
   return { ok: true, name };
+}
+
+// Extracts and validates the WebSocket session id from a $connect event.
+// A session is REQUIRED: connections without ?session= are refused so we never
+// store orphaned connections. Returns { ok, sessionId } or { ok:false, error }.
+function requireSession(event) {
+  const sessionId =
+    event &&
+    event.queryStringParameters &&
+    event.queryStringParameters.session;
+  if (!sessionId) return { ok: false, error: "sessionId required" };
+  return { ok: true, sessionId };
 }
 
 function validateSessionId(raw) {
@@ -33,11 +45,12 @@ function parseBody(event) {
 }
 
 function jsonResponse(statusCode, bodyObj) {
+  const allowOrigin = process.env.ALLOWED_ORIGIN || "*";
   return {
     statusCode,
     headers: {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": allowOrigin,
       "Access-Control-Allow-Headers": "Content-Type",
       "Access-Control-Allow-Methods": "POST,DELETE,OPTIONS",
     },
@@ -56,6 +69,7 @@ const messages = {
 module.exports = {
   MAX_NAME_LENGTH,
   validateName,
+  requireSession,
   validateSessionId,
   parseBody,
   jsonResponse,

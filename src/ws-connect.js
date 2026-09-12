@@ -2,19 +2,26 @@
 "use strict";
 
 const aws = require("./aws");
-const { messages } = require("./lib");
+const { messages, requireSession } = require("./lib");
+const { createLogger } = require("./logger");
 
 exports.handler = async (event) => {
   const connectionId = event.requestContext.connectionId;
-  const sessionId =
-    event.queryStringParameters && event.queryStringParameters.session;
+  const session = requireSession(event);
+  const sessionId = session.ok ? session.sessionId : undefined;
+  const requestId = event.requestContext && event.requestContext.requestId;
+  const logger = createLogger({ requestId, sessionId });
 
-  if (!sessionId) {
-    // Refuse connections without a session.
+  if (!session.ok) {
+    // Refuse connections without a session so we never store orphaned records.
+    logger.warn("connect_no_session", "missing sessionId, refusing connection", {
+      connectionId,
+    });
     return { statusCode: 400, body: "sessionId required" };
   }
 
   await aws.addConnection(sessionId, connectionId);
+  logger.info("connect", "connection stored", { connectionId, sessionId });
 
   // Send the current names to just this new connection.
   try {
@@ -31,7 +38,11 @@ exports.handler = async (event) => {
     }
   } catch (err) {
     // Non-fatal: client can also request sync via $default.
-    console.error("connect sync failed", err);
+    logger.error("connect", "initial sync failed", {
+      connectionId,
+      name: err.name,
+      errorMessage: err.message,
+    });
   }
 
   return { statusCode: 200, body: "connected" };

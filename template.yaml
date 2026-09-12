@@ -4,6 +4,15 @@ Description: >
   Spinning Wheel - real-time self-registration backend.
   REST API (register), WebSocket API (live updates), Lambda, DynamoDB.
 
+Parameters:
+  AllowedOrigin:
+    Type: String
+    Default: "*"
+    Description: >
+      Allowed CORS origin for the REST API. Defaults to "*" for local/dev use;
+      set to the CloudFront origin (e.g. https://d3b9hppiarktsx.cloudfront.net)
+      in production to prevent cross-origin abuse.
+
 Globals:
   Function:
     Runtime: nodejs22.x
@@ -19,6 +28,8 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
       AttributeDefinitions:
         - AttributeName: sessionId
           AttributeType: S
@@ -34,6 +45,8 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
       AttributeDefinitions:
         - AttributeName: sessionId
           AttributeType: S
@@ -174,6 +187,7 @@ Resources:
           CONNECTIONS_TABLE: !Ref ConnectionsTable
           REGISTRATIONS_TABLE: !Ref RegistrationsTable
           WS_ENDPOINT: !Sub https://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+          ALLOWED_ORIGIN: !Ref AllowedOrigin
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref RegistrationsTable
@@ -205,7 +219,7 @@ Resources:
       Cors:
         AllowMethods: "'POST,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type'"
-        AllowOrigin: "'*'"
+        AllowOrigin: !Sub "'${AllowedOrigin}'"
 
   # ---------------- Lambda permissions for WS API ----------------
   WsConnectPermission:
@@ -231,6 +245,39 @@ Resources:
       FunctionName: !Ref WsDefaultFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*
+
+  # ---------------- WAF (rate limiting for the REST API) ----------------
+  RegistrationWebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: spinning-wheel-web-acl
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: spinning-wheel-web-acl
+      Rules:
+        - Name: RateLimitPerIP
+          Priority: 0
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: 100
+              EvaluationWindowSec: 300
+              AggregateKeyType: IP
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitPerIP
+
+  RegistrationWebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub arn:aws:apigateway:${AWS::Region}::/restapis/${RestApi}/stages/prod
+      WebACLArn: !GetAtt RegistrationWebAcl.Arn
 
 Outputs:
   RestApiUrl:
