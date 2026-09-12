@@ -1,0 +1,72 @@
+* { box-sizing: border-box; }
+
+body {
+  font-family: system-ui, Arial, sans-serif;
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  background: #f4f4f4;
+  color: #222;
+}
+
+.app {
+  text-align: center;
+  padding: 24px;
+}
+
+h1 {
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+/* Wheel + arrow container */
+.wheel-wrap {
+  position: relative;
+  width: 400px;
+  max-width: 90vw;
+  margin: 0 auto;
+}
+
+#wheel {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Fixed arrow at the top, pointing down into the wheel */
+.arrow {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 16px solid transparent;
+  border-right: 16px solid transparent;
+  border-top: 26px solid #d33;
+  z-index: 2;
+}
+
+button {
+  margin-top: 20px;
+  padding: 12px 28px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  border: none;
+  border-radius: 6px;
+  background: #2a6;
+  color: #fff;
+}
+
+button:disabled {
+  background: #999;
+  cursor: not-allowed;
+}
+
+.result {
+  margin-top: 18px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  min-height: 1.5em;
+}

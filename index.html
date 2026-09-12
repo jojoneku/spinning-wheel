@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spinning Wheel Picker</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app">
+    <h1>Spin the Wheel</h1>
+
+    <div class="wheel-wrap">
+      <!-- Fixed arrow pointing into the wheel from the top -->
+      <div class="arrow" aria-hidden="true"></div>
+      <canvas id="wheel" width="400" height="400">
+        Your browser does not support canvas.
+      </canvas>
+    </div>
+
+    <button id="spinBtn" type="button">Spin</button>
+
+    <p id="result" class="result" aria-live="polite">Press Spin to pick a winner.</p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
