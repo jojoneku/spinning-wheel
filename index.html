@@ -4,25 +4,162 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Spinning Wheel Picker</title>
-  <link rel="stylesheet" href="styles.css">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, Arial, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      background: #f4f4f4;
+      color: #232F3E;
+    }
+    .app { text-align: center; padding: 24px; }
+    h1 { font-weight: 600; margin-bottom: 16px; }
+    .wheel-wrap {
+      position: relative;
+      width: 400px;
+      max-width: 90vw;
+      margin: 0 auto;
+    }
+    #wheel { width: 100%; height: auto; display: block; }
+    /* Fixed orange arrow at 12 o'clock, pointing down into the wheel */
+    .arrow {
+      position: absolute;
+      top: -6px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 16px solid transparent;
+      border-right: 16px solid transparent;
+      border-top: 26px solid #FF9900;
+      z-index: 2;
+    }
+    button {
+      margin-top: 20px;
+      padding: 12px 32px;
+      font-size: 1.1rem;
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+      background: #FF9900;
+      color: #232F3E;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    .result {
+      margin-top: 18px;
+      font-size: 1.25rem;
+      font-weight: 600;
+      min-height: 1.5em;
+    }
+  </style>
 </head>
 <body>
   <main class="app">
     <h1>Spin the Wheel</h1>
 
     <div class="wheel-wrap">
-      <!-- Fixed arrow pointing into the wheel from the top -->
       <div class="arrow" aria-hidden="true"></div>
       <canvas id="wheel" width="400" height="400">
         Your browser does not support canvas.
       </canvas>
     </div>
 
-    <button id="spinBtn" type="button">Spin</button>
+    <button id="spinBtn" type="button">SPIN</button>
 
-    <p id="result" class="result" aria-live="polite">Press Spin to pick a winner.</p>
+    <p id="result" class="result" aria-live="polite">Press SPIN to pick a winner.</p>
   </main>
 
-  <script src="app.js"></script>
+  <script type="module">
+    import {
+      COLORS, FRICTION, MIN_VELOCITY, MAX_VELOCITY, STOP_THRESHOLD,
+      getSlotAngle, getWinnerIndex
+    } from './wheel-logic.js';
+
+    // Hardcoded dummy names — one per slot.
+    const NAMES = ['Alice', 'Bob', 'Charlie', 'Diana', 'Ethan', 'Fiona', 'George', 'Hana'];
+    const NUM_SLOTS = NAMES.length;
+    const SLOT_ANGLE = getSlotAngle(NUM_SLOTS);
+
+    const canvas = document.getElementById('wheel');
+    const ctx = canvas.getContext('2d');
+    const spinBtn = document.getElementById('spinBtn');
+    const result = document.getElementById('result');
+
+    const CX = canvas.width / 2;
+    const CY = canvas.height / 2;
+    const R = Math.min(CX, CY) - 6;
+
+    let rotation = 0;
+    let velocity = 0;
+    let spinning = false;
+
+    // 2.1 Render wheel with hardcoded names
+    function drawWheel(rot) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < NUM_SLOTS; i++) {
+        const start = rot + i * SLOT_ANGLE;
+        const end = start + SLOT_ANGLE;
+
+        ctx.beginPath();
+        ctx.moveTo(CX, CY);
+        ctx.arc(CX, CY, R, start, end);
+        ctx.closePath();
+        ctx.fillStyle = COLORS[i % COLORS.length];
+        ctx.fill();
+
+        ctx.save();
+        ctx.translate(CX, CY);
+        ctx.rotate(start + SLOT_ANGLE / 2);
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff';
+        ctx.font = '16px system-ui, Arial, sans-serif';
+        ctx.fillText(NAMES[i], R - 14, 0);
+        ctx.restore();
+      }
+      // Center hub
+      ctx.beginPath();
+      ctx.arc(CX, CY, 28, 0, 2 * Math.PI);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.strokeStyle = '#ccc';
+      ctx.stroke();
+    }
+
+    // 2.2 Wire spin button to animation loop (friction-based)
+    function spin() {
+      if (spinning) return;
+      spinning = true;
+      spinBtn.disabled = true;
+      result.textContent = 'Spinning…';
+      velocity = MIN_VELOCITY + Math.random() * (MAX_VELOCITY - MIN_VELOCITY);
+      rotation += Math.random() * 2 * Math.PI; // random starting offset
+      requestAnimationFrame(frame);
+    }
+
+    function frame() {
+      rotation += velocity;
+      velocity *= FRICTION;
+      drawWheel(rotation);
+
+      if (velocity < STOP_THRESHOLD) {
+        // 2.3 Display winner after deceleration
+        const winner = NAMES[getWinnerIndex(rotation, NUM_SLOTS)];
+        result.textContent = `Winner: ${winner} 🎉`;
+        spinning = false;
+        spinBtn.disabled = false;
+        return;
+      }
+      requestAnimationFrame(frame);
+    }
+
+    spinBtn.addEventListener('click', spin);
+    drawWheel(rotation); // initial static wheel
+  </script>
 </body>
 </html>

@@ -3,10 +3,11 @@
 ## Introduction
 
 A very lean, single-page web application that displays a spinning wheel divided
-into slots. Each slot is auto-populated with a dummy name. The user presses a
-button to spin the wheel; when it stops, a fixed arrow points to one slot, and
-that name is announced as the winner. Built with plain HTML, CSS, and vanilla
-JavaScript — no frameworks, no build step, no external dependencies.
+into slots, each pre-populated with a hardcoded dummy name. Pressing a button
+spins the wheel; it decelerates via a friction model and, when it stops, a fixed
+arrow at 12 o'clock indicates the winning slot. Built with plain HTML, CSS, and
+vanilla JavaScript — no frameworks, no build step. Spin logic lives in a
+separate ES module of pure functions so it can be unit-tested.
 
 ## Requirements
 
@@ -16,12 +17,12 @@ JavaScript — no frameworks, no build step, no external dependencies.
 in, so that I can spin immediately without any setup.
 
 #### Acceptance Criteria
-1. WHEN the page loads THEN the system SHALL render a wheel divided into N equal
-   slots (N between 6 and 12).
+1. WHEN the wheel is drawn THEN the system SHALL divide it into N equal slots
+   using `getSlotAngle(N)`.
 2. WHEN the wheel is rendered THEN the system SHALL populate each slot with a
-   distinct dummy name from a built-in list.
-3. WHEN slots are drawn THEN the system SHALL give adjacent slots visually
-   distinguishable colors.
+   distinct hardcoded dummy name.
+3. WHEN slots are colored THEN the system SHALL cycle a 3-color palette so that
+   adjacent slots are always visually distinct regardless of slot count.
 4. WHEN a slot label is rendered THEN the system SHALL display the name legibly
    within its slot.
 
@@ -31,52 +32,47 @@ in, so that I can spin immediately without any setup.
 that a winner is chosen at random.
 
 #### Acceptance Criteria
-1. WHEN the page loads THEN the system SHALL display a clearly labeled spin
-   button.
-2. WHEN the user presses the spin button THEN the system SHALL start rotating
-   the wheel.
-3. WHEN a spin is in progress THEN the system SHALL disable the spin button to
-   prevent overlapping spins.
-4. WHEN the spin starts THEN the system SHALL apply a randomized final angle so
-   the outcome is not predictable between spins.
+1. WHEN the page loads THEN the system SHALL display a labeled SPIN button.
+2. WHEN the user presses SPIN THEN the system SHALL start the wheel with a
+   randomized initial angular velocity.
+3. WHEN a spin is in progress THEN the system SHALL prevent overlapping spins.
 
-### Requirement 3 — Realistic spin animation
+### Requirement 3 — Friction-based deceleration
 
-**User Story:** As a user, I want the wheel to spin and gradually slow to a
-stop, so that the result feels natural.
+**User Story:** As a user, I want the wheel to slow down naturally, so that the
+result feels realistic.
 
 #### Acceptance Criteria
-1. WHEN a spin begins THEN the system SHALL animate the rotation smoothly using
-   requestAnimationFrame.
-2. WHEN the wheel is spinning THEN the system SHALL apply an ease-out
-   deceleration so it slows gradually before stopping.
-3. WHEN the animation completes THEN the system SHALL leave the wheel at rest at
-   a stable final angle.
+1. WHEN the wheel spins THEN the system SHALL reduce angular velocity each frame
+   by a constant FRICTION factor.
+2. WHEN the velocity falls below STOP_THRESHOLD THEN the system SHALL stop the
+   wheel.
+3. WHEN animating THEN the system SHALL use requestAnimationFrame.
 
 ### Requirement 4 — Winner selection via arrow
 
-**User Story:** As a user, I want a fixed arrow to indicate the winning slot, so
-that the result is unambiguous.
+**User Story:** As a user, I want a fixed arrow to indicate the winning slot.
 
 #### Acceptance Criteria
-1. WHEN the wheel is displayed THEN the system SHALL render a fixed pointer/arrow
-   at a fixed position on the wheel's edge.
-2. WHEN the wheel stops THEN the system SHALL determine which slot lies under the
-   arrow based on the final rotation angle.
+1. WHEN the wheel is displayed THEN the system SHALL render a fixed arrow at
+   12 o'clock.
+2. WHEN the wheel stops THEN the system SHALL determine the slot under the arrow
+   using `getWinnerIndex(rotation, N)`, accounting for the arrow at `-π/2`.
 3. WHEN the winning slot is determined THEN the system SHALL display the winning
-   name in a result area.
-4. WHEN a new spin is started THEN the system SHALL clear or replace the previous
+   name.
+4. WHEN a new spin starts THEN the system SHALL clear or replace the previous
    result.
 
-### Requirement 5 — Lean, dependency-free implementation
+### Requirement 5 — Lean, testable, dependency-free implementation
 
-**User Story:** As a developer, I want the app to be minimal and portable, so
-that it runs by simply opening a file.
+**User Story:** As a developer, I want the logic isolated and testable.
 
 #### Acceptance Criteria
-1. WHEN the project is built THEN the system SHALL use only HTML, CSS, and
-   vanilla JavaScript.
-2. WHEN the page is opened directly in a browser (file://) THEN the system SHALL
-   function without a server or build step.
-3. WHEN the code is written THEN the system SHALL NOT include any third-party
-   frameworks or libraries.
+1. WHEN the spin logic is written THEN the system SHALL place pure functions
+   (`getSlotAngle`, `getWinnerIndex`, `simulateDeceleration`) and constants
+   (`COLORS`, `FRICTION`, `MIN_VELOCITY`, `MAX_VELOCITY`, `STOP_THRESHOLD`) in a
+   separate ES module `wheel-logic.js`.
+2. WHEN the page is opened in a browser THEN the system SHALL function without a
+   build step, using only HTML, CSS, and vanilla JavaScript.
+3. WHEN dependencies are considered THEN the system SHALL NOT use any
+   third-party frameworks or libraries.

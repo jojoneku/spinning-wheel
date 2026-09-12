@@ -2,94 +2,70 @@
 
 ## Overview
 
-A single static HTML page draws a wheel on an HTML5 `<canvas>`, spins it via a
-`requestAnimationFrame` animation loop with ease-out deceleration, and reports
-the slot under a fixed arrow when motion stops. Three files, no dependencies:
+A single static HTML page draws a wheel on an HTML5 `<canvas>` and spins it with
+a friction-based physics model. The spin logic is extracted into a separate,
+dependency-free ES module (`wheel-logic.js`) that exports **pure functions** and
+tunable constants, so it can be unit-tested in isolation with Node's built-in
+test runner.
 
 ```
-index.html   structure: canvas, arrow, spin button, winner display
-styles.css   minimal layout + fixed arrow
-app.js       data, drawing, spin physics, winner detection
+wheel-logic.js   pure functions + constants (getSlotAngle, getWinnerIndex,
+                 simulateDeceleration, COLORS, FRICTION, ...)
+index.html       canvas wheel, orange arrow at 12 o'clock, SPIN button,
+                 animation loop, winner display (imports wheel-logic.js)
+wheel-logic.test.js  optional Node unit tests
 ```
 
-## Architecture
+## wheel-logic.js — exported API
 
-```
-[Spin button] --click--> spin()
-                              |
-                              v
-        pick random target rotation (many turns + random offset)
-                              |
-                              v
-   requestAnimationFrame loop: interpolate angle with ease-out
-                              |
-                    draw wheel at current angle
-                              |
-                        (loop until done)
-                              |
-                              v
-              getWinnerIndex(finalAngle) --> show name
-```
+### Constants
+- `COLORS = ["#FF9900", "#232F3E", "#37475A"]` — a **3-color cycle**. Cycling
+  three colors guarantees adjacent slots differ regardless of slot count (a
+  2-color scheme collides when the count is odd).
+- `FRICTION = 0.98` — per-frame velocity multiplier; gives a natural slow-down.
+- `MIN_VELOCITY`, `MAX_VELOCITY` — bounds for the randomized initial spin speed.
+- `STOP_THRESHOLD = 0.001` — when angular velocity drops below this, the wheel
+  is considered stopped.
 
-## Data
+### Functions
+- `getSlotAngle(numSlots)` → `2π / numSlots`. The angular width of one slot.
+- `getWinnerIndex(rot, numSlots)` → index of the slot under the arrow.
+  - The arrow sits at **12 o'clock**, which is `-π/2` in canvas coordinates
+    (x→right, y→down). The function adjusts by `+π/2`, normalizes into
+    `[0, 2π)`, and maps the angle to a slot:
+    ```
+    adjusted = rot + π/2
+    normalized = ((adjusted mod 2π) + 2π) mod 2π
+    index = floor((2π - normalized) / slotAngle) mod numSlots
+    ```
+- `simulateDeceleration(velocity, friction, stopThreshold)` → returns the number
+  of frames until the wheel stops (velocity < stopThreshold), by repeatedly
+  applying `velocity *= friction`. Pure and deterministic — easy to unit test.
 
-- `NAMES`: a built-in array of dummy names (e.g. Alice, Bob, Carla, ...).
-- `SLOT_COUNT`: number of slots actually used (`NAMES.length`, kept 6–12).
-- Each slot spans `2π / SLOT_COUNT` radians.
+## Animation model (in index.html)
 
-## Wheel rendering (`drawWheel(rotation)`)
+- On SPIN: pick a random initial `velocity` in `[MIN_VELOCITY, MAX_VELOCITY]`.
+- Each `requestAnimationFrame`: `rotation += velocity; velocity *= FRICTION;`
+  redraw. When `velocity < STOP_THRESHOLD`, stop and compute the winner with
+  `getWinnerIndex(rotation, numSlots)`.
+- Because deceleration is driven purely by friction on a random starting
+  velocity, both the duration and final resting slot vary each spin.
 
-- Canvas is square (e.g. 400×400); center `(cx, cy)`, radius `r`.
-- For each slot `i`:
-  - `start = rotation + i * slice`, `end = start + slice`.
-  - Draw a filled wedge (`moveTo(center)` → `arc(...)` → `fill`), alternating two
-    colors (with an accent for odd counts to avoid same-color neighbors).
-  - Draw the name rotated to the slice's mid-angle, offset outward from center.
-- A small hub circle is drawn at the center for a clean look.
+## Rendering (in index.html)
 
-## Arrow / pointer
+- Square canvas; for each slot `i` draw a wedge filled with
+  `COLORS[i % COLORS.length]`, plus the name rotated to the slice mid-angle.
+- A fixed **orange arrow** is drawn/positioned at the top (12 o'clock), not
+  rotating with the wheel.
 
-- Fixed, non-rotating element pointing **inward at the top** (12 o'clock),
-  drawn as a CSS triangle positioned over the canvas edge. The angle at the top
-  corresponds to `-π/2` (i.e. `1.5π`) in canvas coordinates (x→right, y→down).
+## Winner detection rationale
 
-## Spin physics (`spin()`)
-
-- Guard: ignore if already spinning; disable the button while spinning.
-- Choose `extraTurns` (e.g. 5–8 full rotations) plus a random `finalOffset` in
-  `[0, 2π)`. Target: `targetRotation = currentRotation + extraTurns*2π + offset`.
-- Duration ~4000 ms. On each frame compute progress `t = elapsed / duration`,
-  clamp to 1, apply ease-out: `eased = 1 - (1 - t)^3` (cubic ease-out).
-- `angle = startRotation + (targetRotation - startRotation) * eased`.
-- Redraw each frame. When `t >= 1`, stop, store final angle, compute winner,
-  re-enable button.
-
-## Winner detection (`getWinnerIndex(rotation)`)
-
-The arrow sits at the top = canvas angle `topAngle = 1.5π` (pointing where
-`3π/2` is, i.e. straight up given y-down coordinates). To find the slot beneath
-it:
-
-1. Normalize: `norm = ((topAngle - rotation) mod 2π + 2π) mod 2π`.
-2. `index = floor(norm / slice) mod SLOT_COUNT`.
-
-This maps the fixed top pointer back through the wheel's current rotation to the
-slot occupying that position. The formula is verified against known angles in
-the verification task.
-
-## UI states
-
-- **Idle**: wheel at rest, button enabled, result shows last winner (or a prompt).
-- **Spinning**: button disabled/greyed, result cleared to "Spinning…".
-- **Result**: winner name shown prominently; button re-enabled.
-
-## Accessibility / niceties (lightweight)
-
-- Button is a real `<button>`.
-- Result area uses `aria-live="polite"` so the winner is announced.
-- Colors chosen with enough contrast for legible white/dark text.
+The arrow is fixed at the top while the wheel rotates underneath. `getWinnerIndex`
+inverts the current rotation to find which slot currently occupies the 12 o'clock
+position, accounting for the arrow's `-π/2` canvas angle via the `+π/2`
+adjustment. This is covered by unit tests against known angles.
 
 ## Non-goals
 
-- Editing names in the UI, weighting, sound, persistence, or multiple wheels.
-  (Names are auto-populated per requirements; kept intentionally minimal.)
+Editing names in the UI, weighting, sound, persistence. Names are hardcoded per
+requirements; the app is intentionally minimal.

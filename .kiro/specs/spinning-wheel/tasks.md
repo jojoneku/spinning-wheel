@@ -1,34 +1,23 @@
 # Implementation Plan — Spinning Wheel Winner Picker
 
-- [ ] 1. Scaffold the page structure
-  - Create `index.html` with a `<canvas>`, a fixed arrow element, a spin
-    `<button>`, and a result area with `aria-live`.
-  - Link `styles.css` and `app.js`.
-  - _Requirements: 2.1, 4.1, 5.1, 5.2_
+- [ ] 1. Create wheel-logic.js with constants and pure functions
+  - [ ] 1.1 Export getSlotAngle, getWinnerIndex, simulateDeceleration
+  - [ ] 1.2 Export COLORS, FRICTION, MIN_VELOCITY, MAX_VELOCITY, STOP_THRESHOLD
+  - _Requirements: 1.1, 3.1, 3.2, 4.2, 5.1, 5.3_
 
-- [ ] 2. Style the layout and arrow
-  - Create `styles.css`: center the wheel, style the button, style the winner
-    text, and draw the fixed pointer triangle at the top of the wheel.
-  - _Requirements: 4.1, 5.1_
+- [ ] 2. Create index.html with canvas wheel and spin button
+  - [ ] 2.1 Render wheel with hardcoded names
+  - [ ] 2.2 Wire spin button to animation loop
+  - [ ] 2.3 Display winner after deceleration
+  - _Requirements: 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 3.3, 4.1, 4.3, 4.4_
 
-- [ ] 3. Define data and draw the wheel
-  - In `app.js`, add the `NAMES` array (6–12 dummy names) and `drawWheel(rotation)`
-    that renders alternating colored wedges with rotated name labels and a hub.
-  - Draw the initial static wheel on load.
-  - _Requirements: 1.1, 1.2, 1.3, 1.4_
-
-- [ ] 4. Implement the spin animation
-  - Add `spin()` using `requestAnimationFrame` with a random target angle,
-    multiple turns, and cubic ease-out deceleration; disable the button while
-    spinning.
-  - _Requirements: 2.2, 2.3, 2.4, 3.1, 3.2, 3.3_
-
-- [ ] 5. Implement winner detection and display
-  - Add `getWinnerIndex(rotation)` mapping the top arrow back to a slot; on stop,
-    show the winning name and re-enable the button; clear result on new spin.
-  - _Requirements: 4.2, 4.3, 4.4_
-
-- [ ] 6. Verify
-  - Unit-check `getWinnerIndex` against known angles; serve the page locally and
-    confirm it loads with no console errors and spins to a winner.
+- [ ] 3. Checkpoint — verify wheel works locally
+  - Confirm the page loads with no console errors, the wheel spins, decelerates
+    via friction, and reports the slot under the 12 o'clock arrow. Verify with
+    Chrome DevTools MCP or manually in a browser.
   - _Requirements: 3.3, 4.2, 4.3_
+
+- [ ] 4. (Optional) Unit tests for wheel-logic.js
+  - Use Node's built-in test runner to test getSlotAngle, getWinnerIndex, and
+    simulateDeceleration.
+  - _Requirements: 5.1_
