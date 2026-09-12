@@ -3,163 +3,223 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Spinning Wheel Picker</title>
+  <title>Spinning Wheel</title>
   <style>
     * { box-sizing: border-box; }
     body {
       font-family: system-ui, Arial, sans-serif;
       margin: 0;
       min-height: 100vh;
-      display: flex;
-      justify-content: center;
       background: #f4f4f4;
       color: #232F3E;
     }
-    .app { text-align: center; padding: 24px; }
-    h1 { font-weight: 600; margin-bottom: 16px; }
-    .wheel-wrap {
-      position: relative;
-      width: 400px;
-      max-width: 90vw;
-      margin: 0 auto;
+    .layout {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 32px;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
     }
+    .panel { text-align: center; }
+    h1 { font-weight: 600; margin: 0 0 12px; }
+    .wheel-wrap { position: relative; width: 420px; max-width: 90vw; margin: 0 auto; }
     #wheel { width: 100%; height: auto; display: block; }
-    /* Fixed orange arrow at 12 o'clock, pointing down into the wheel */
     .arrow {
-      position: absolute;
-      top: -6px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 0;
-      height: 0;
+      position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
+      width: 0; height: 0;
       border-left: 16px solid transparent;
       border-right: 16px solid transparent;
       border-top: 26px solid #FF9900;
       z-index: 2;
     }
     button {
-      margin-top: 20px;
-      padding: 12px 32px;
-      font-size: 1.1rem;
-      cursor: pointer;
-      border: none;
-      border-radius: 6px;
-      background: #FF9900;
-      color: #232F3E;
-      font-weight: 700;
-      letter-spacing: 0.05em;
+      margin-top: 20px; padding: 12px 32px; font-size: 1.1rem;
+      cursor: pointer; border: none; border-radius: 6px;
+      background: #FF9900; color: #232F3E; font-weight: 700; letter-spacing: 0.05em;
     }
     button:disabled { background: #ccc; cursor: not-allowed; }
-    .result {
-      margin-top: 18px;
-      font-size: 1.25rem;
-      font-weight: 600;
-      min-height: 1.5em;
+    button.reset { background: #ddd; font-size: 0.9rem; padding: 8px 18px; }
+    .result { margin-top: 16px; font-size: 1.4rem; font-weight: 700; min-height: 1.5em; }
+    .qr-card {
+      background: #fff; padding: 20px; border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     }
+    .qr-card h2 { margin: 0 0 12px; font-size: 1.1rem; }
+    #qr img, #qr canvas { width: 240px; height: 240px; image-rendering: pixelated; }
+    .join-url { margin-top: 12px; font-size: 0.8rem; color: #555; word-break: break-all; max-width: 260px; }
+    .count { margin-top: 10px; color: #555; }
+    .status { position: fixed; top: 8px; right: 12px; font-size: 0.8rem; color: #999; }
   </style>
 </head>
 <body>
-  <main class="app">
-    <h1>Spin the Wheel</h1>
+  <div class="status" id="status">connecting…</div>
 
-    <div class="wheel-wrap">
-      <div class="arrow" aria-hidden="true"></div>
-      <canvas id="wheel" width="400" height="400">
-        Your browser does not support canvas.
-      </canvas>
+  <div class="layout">
+    <div class="panel">
+      <h1>Spin the Wheel</h1>
+      <div class="wheel-wrap">
+        <div class="arrow" aria-hidden="true"></div>
+        <canvas id="wheel" width="420" height="420"></canvas>
+      </div>
+      <div class="count" id="count">0 participants</div>
+      <div>
+        <button id="spinBtn" type="button" disabled>SPIN</button>
+        <button id="resetBtn" type="button" class="reset">Reset</button>
+      </div>
+      <p id="result" class="result" aria-live="polite"></p>
     </div>
 
-    <button id="spinBtn" type="button">SPIN</button>
+    <div class="panel qr-card">
+      <h2>Scan to join</h2>
+      <div id="qr"></div>
+      <div class="join-url" id="joinUrl"></div>
+    </div>
+  </div>
 
-    <p id="result" class="result" aria-live="polite">Press SPIN to pick a winner.</p>
-  </main>
-
+  <script src="config.js"></script>
+  <script src="vendor/qrcode-generator.js"></script>
   <script type="module">
     import {
       COLORS, FRICTION, MIN_VELOCITY, MAX_VELOCITY, STOP_THRESHOLD,
       getSlotAngle, getWinnerIndex
     } from './wheel-logic.js';
 
-    // Hardcoded dummy names — one per slot.
-    const NAMES = ['Alice', 'Bob', 'Charlie', 'Diana', 'Ethan', 'Fiona', 'George', 'Hana'];
-    const NUM_SLOTS = NAMES.length;
-    const SLOT_ANGLE = getSlotAngle(NUM_SLOTS);
+    // ---------- Session ----------
+    const params = new URLSearchParams(location.search);
+    let sessionId = params.get('session');
+    if (!sessionId) {
+      sessionId = (crypto.randomUUID && crypto.randomUUID()) ||
+                  ('s-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+      params.set('session', sessionId);
+      history.replaceState(null, '', location.pathname + '?' + params.toString());
+    }
 
+    const WS_URL = (window.APP_CONFIG && window.APP_CONFIG.WEBSOCKET_URL) || '';
+
+    // ---------- QR code ----------
+    const registerUrl = location.origin +
+      location.pathname.replace(/index\.html$/, '').replace(/\/$/, '') +
+      '/register.html?session=' + encodeURIComponent(sessionId);
+    document.getElementById('joinUrl').textContent = registerUrl;
+    (function renderQR() {
+      const qr = window.qrcode(0, 'M');
+      qr.addData(registerUrl);
+      qr.make();
+      document.getElementById('qr').innerHTML = qr.createImgTag(6, 8);
+    })();
+
+    // ---------- Wheel state ----------
+    let names = [];
     const canvas = document.getElementById('wheel');
     const ctx = canvas.getContext('2d');
+    const CX = canvas.width / 2, CY = canvas.height / 2, R = Math.min(CX, CY) - 6;
+    let rotation = 0, velocity = 0, spinning = false;
+
     const spinBtn = document.getElementById('spinBtn');
+    const resetBtn = document.getElementById('resetBtn');
     const result = document.getElementById('result');
+    const count = document.getElementById('count');
 
-    const CX = canvas.width / 2;
-    const CY = canvas.height / 2;
-    const R = Math.min(CX, CY) - 6;
+    function updateCount() {
+      count.textContent = names.length + (names.length === 1 ? ' participant' : ' participants');
+      spinBtn.disabled = spinning || names.length === 0;
+    }
 
-    let rotation = 0;
-    let velocity = 0;
-    let spinning = false;
-
-    // 2.1 Render wheel with hardcoded names
     function drawWheel(rot) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (let i = 0; i < NUM_SLOTS; i++) {
-        const start = rot + i * SLOT_ANGLE;
-        const end = start + SLOT_ANGLE;
-
-        ctx.beginPath();
-        ctx.moveTo(CX, CY);
-        ctx.arc(CX, CY, R, start, end);
-        ctx.closePath();
-        ctx.fillStyle = COLORS[i % COLORS.length];
-        ctx.fill();
-
-        ctx.save();
-        ctx.translate(CX, CY);
-        ctx.rotate(start + SLOT_ANGLE / 2);
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#fff';
-        ctx.font = '16px system-ui, Arial, sans-serif';
-        ctx.fillText(NAMES[i], R - 14, 0);
-        ctx.restore();
+      if (names.length === 0) {
+        ctx.beginPath(); ctx.arc(CX, CY, R, 0, 2 * Math.PI);
+        ctx.fillStyle = '#e6e6e6'; ctx.fill();
+        ctx.fillStyle = '#888'; ctx.font = '18px system-ui, Arial';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('Waiting for players…', CX, CY);
+        return;
       }
-      // Center hub
-      ctx.beginPath();
-      ctx.arc(CX, CY, 28, 0, 2 * Math.PI);
-      ctx.fillStyle = '#fff';
-      ctx.fill();
-      ctx.strokeStyle = '#ccc';
-      ctx.stroke();
+      const n = names.length, slot = getSlotAngle(n);
+      for (let i = 0; i < n; i++) {
+        const start = rot + i * slot, end = start + slot;
+        ctx.beginPath(); ctx.moveTo(CX, CY); ctx.arc(CX, CY, R, start, end);
+        ctx.closePath(); ctx.fillStyle = COLORS[i % COLORS.length]; ctx.fill();
+        ctx.save(); ctx.translate(CX, CY); ctx.rotate(start + slot / 2);
+        ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff'; ctx.font = '15px system-ui, Arial';
+        ctx.fillText(names[i], R - 14, 0); ctx.restore();
+      }
+      ctx.beginPath(); ctx.arc(CX, CY, 26, 0, 2 * Math.PI);
+      ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#ccc'; ctx.stroke();
     }
 
-    // 2.2 Wire spin button to animation loop (friction-based)
     function spin() {
-      if (spinning) return;
-      spinning = true;
-      spinBtn.disabled = true;
-      result.textContent = 'Spinning…';
+      if (spinning || names.length === 0) return;
+      spinning = true; spinBtn.disabled = true; result.textContent = 'Spinning…';
       velocity = MIN_VELOCITY + Math.random() * (MAX_VELOCITY - MIN_VELOCITY);
-      rotation += Math.random() * 2 * Math.PI; // random starting offset
+      rotation += Math.random() * 2 * Math.PI;
       requestAnimationFrame(frame);
     }
-
     function frame() {
-      rotation += velocity;
-      velocity *= FRICTION;
-      drawWheel(rotation);
-
+      rotation += velocity; velocity *= FRICTION; drawWheel(rotation);
       if (velocity < STOP_THRESHOLD) {
-        // 2.3 Display winner after deceleration
-        const winner = NAMES[getWinnerIndex(rotation, NUM_SLOTS)];
-        result.textContent = `Winner: ${winner} 🎉`;
-        spinning = false;
-        spinBtn.disabled = false;
+        const winner = names[getWinnerIndex(rotation, names.length)];
+        result.textContent = 'Winner: ' + winner + ' 🎉';
+        spinning = false; updateCount();
+        sendWinner(winner);
         return;
       }
       requestAnimationFrame(frame);
     }
 
+    // ---------- WebSocket client with auto-reconnect ----------
+    let ws = null, reconnectDelay = 1000;
+    const status = document.getElementById('status');
+
+    function connect() {
+      if (!WS_URL || WS_URL.indexOf('REPLACE_WITH') === 0) {
+        status.textContent = 'offline (no backend configured)';
+        return;
+      }
+      ws = new WebSocket(WS_URL + '?session=' + encodeURIComponent(sessionId));
+
+      ws.onopen = () => {
+        status.textContent = 'live';
+        reconnectDelay = 1000;
+        ws.send(JSON.stringify({ action: 'sync', sessionId }));
+      };
+      ws.onmessage = (evt) => {
+        let m; try { m = JSON.parse(evt.data); } catch { return; }
+        if (m.type === 'sync') { names = m.names || []; drawWheel(rotation); updateCount(); }
+        else if (m.type === 'new_name') {
+          if (!names.includes(m.name)) { names.push(m.name); drawWheel(rotation); updateCount(); }
+        }
+        else if (m.type === 'reset') { names = []; result.textContent = ''; drawWheel(rotation); updateCount(); }
+        else if (m.type === 'winner') { result.textContent = 'Winner: ' + m.name + ' 🎉'; }
+      };
+      ws.onclose = () => {
+        status.textContent = 'reconnecting…';
+        setTimeout(connect, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 15000);
+      };
+      ws.onerror = () => { try { ws.close(); } catch {} };
+    }
+
+    function sendWinner(name) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'winner', sessionId, name }));
+      }
+    }
+    function sendReset() {
+      names = []; result.textContent = ''; drawWheel(rotation); updateCount();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'reset', sessionId }));
+      }
+    }
+
     spinBtn.addEventListener('click', spin);
-    drawWheel(rotation); // initial static wheel
+    resetBtn.addEventListener('click', sendReset);
+
+    drawWheel(rotation);
+    updateCount();
+    connect();
   </script>
 </body>
 </html>

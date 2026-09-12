@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join the Wheel</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, Arial, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #232F3E;
+      color: #fff;
+      padding: 20px;
+    }
+    .card {
+      background: #fff;
+      color: #232F3E;
+      width: 100%;
+      max-width: 380px;
+      padding: 28px;
+      border-radius: 12px;
+      text-align: center;
+    }
+    h1 { margin: 0 0 6px; font-size: 1.4rem; }
+    p.sub { margin: 0 0 20px; color: #555; font-size: 0.95rem; }
+    input {
+      width: 100%;
+      padding: 14px;
+      font-size: 1.1rem;
+      border: 2px solid #ccc;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+    button {
+      width: 100%;
+      padding: 14px;
+      font-size: 1.1rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 8px;
+      background: #FF9900;
+      color: #232F3E;
+      cursor: pointer;
+    }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    .msg { margin-top: 14px; min-height: 1.4em; font-weight: 600; }
+    .msg.error { color: #d33; }
+    .msg.ok { color: #2a7; }
+    .done h1 { color: #2a7; }
+  </style>
+</head>
+<body>
+  <div class="card" id="card">
+    <h1 id="title">Join the Wheel</h1>
+    <p class="sub" id="sub">Enter your name to appear on the wheel.</p>
+    <form id="form">
+      <input id="name" type="text" placeholder="Your name" maxlength="30"
+             autocomplete="off" autofocus required>
+      <button id="submit" type="submit">Join</button>
+    </form>
+    <div class="msg" id="msg" aria-live="polite"></div>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const sessionId = params.get('session');
+
+    const form = document.getElementById('form');
+    const nameInput = document.getElementById('name');
+    const submitBtn = document.getElementById('submit');
+    const msg = document.getElementById('msg');
+    const title = document.getElementById('title');
+    const sub = document.getElementById('sub');
+
+    const REST = (window.APP_CONFIG && window.APP_CONFIG.REST_API_URL) || '';
+
+    function setMsg(text, kind) {
+      msg.textContent = text;
+      msg.className = 'msg' + (kind ? ' ' + kind : '');
+    }
+
+    if (!sessionId) {
+      setMsg('Missing session. Please rescan the QR code.', 'error');
+      submitBtn.disabled = true;
+      nameInput.disabled = true;
+    }
+
+    function lockAsDone(name) {
+      form.style.display = 'none';
+      title.textContent = "You're in! 🎉";
+      title.parentElement.classList.add('done');
+      sub.textContent = `${name}, watch the big screen — good luck!`;
+      setMsg('', '');
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = nameInput.value.trim();
+      if (!name) { setMsg('Please enter a name.', 'error'); return; }
+      if (name.length > 30) { setMsg('Name is too long (max 30).', 'error'); return; }
+
+      submitBtn.disabled = true;
+      setMsg('Joining…', '');
+
+      try {
+        const res = await fetch(REST + '/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, name }),
+        });
+
+        if (res.status === 201) {
+          lockAsDone(name);
+        } else if (res.status === 409) {
+          setMsg('That name is already taken. Try another.', 'error');
+          submitBtn.disabled = false;
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setMsg(data.error || `Something went wrong (${res.status}).`, 'error');
+          submitBtn.disabled = false;
+        }
+      } catch (err) {
+        setMsg('Network error. Check your connection and retry.', 'error');
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

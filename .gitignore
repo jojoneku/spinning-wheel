@@ -3,5 +3,10 @@
 __pycache__/
 *.pyc
 
+# SAM / Node build artifacts
+.aws-sam/
+node_modules/
+package-lock.json
+
 # OS
 .DS_Store

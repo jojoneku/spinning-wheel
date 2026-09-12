@@ -1,0 +1,11 @@
+{
+  "name": "spinning-wheel-backend",
+  "version": "1.0.0",
+  "description": "Lambda handlers for the spinning-wheel real-time registration backend",
+  "type": "commonjs",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "@aws-sdk/lib-dynamodb": "^3.600.0",
+    "@aws-sdk/client-apigatewaymanagementapi": "^3.600.0"
+  }
+}

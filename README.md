@@ -1,45 +1,60 @@
 # Spinning Wheel Workshop
 
-A very lean spinning-wheel winner picker built with plain HTML, CSS, and vanilla
-JavaScript — no frameworks, no build step, no dependencies. Spin logic lives in
-a separate ES module of pure functions so it can be unit-tested.
+A real-time, multi-participant spinning-wheel picker. A presenter shows the wheel
+on a big screen; participants scan a QR code, register their names on their
+phones, and see the wheel update **live**. When the wheel stops, the winner is
+notified on their phone. Frontend is plain HTML/CSS/vanilla JS; the backend is
+serverless AWS (API Gateway REST + WebSocket, Lambda, DynamoDB) defined in SAM.
 
-## Run it
+## Architecture
 
-Open `index.html` in a browser. Because it uses an ES module (`wheel-logic.js`),
-serve it over HTTP rather than `file://`:
-
-```bash
-python3 -m http.server 8000
-# then visit http://localhost:8000
+```
+Phone (register.html) --POST /register--> REST API --> register Lambda --> DynamoDB
+                                                             |
+Presenter (index.html) <==WebSocket==> WebSocket API <-------+ (broadcast new_name/winner)
 ```
 
-## How it works
-
-- The wheel loads pre-populated with hardcoded dummy names, one per slot.
-- Press **SPIN** — the wheel starts at a random velocity and slows down via a
-  friction model (`velocity *= FRICTION` each frame).
-- When velocity drops below `STOP_THRESHOLD`, the wheel stops and a fixed orange
-  arrow at 12 o'clock marks the winning slot, which is announced.
+- **DynamoDB**: `Registrations` (sessionId, name) and `Connections` (sessionId, connectionId)
+- **Lambda**: `ws-connect`, `ws-disconnect`, `register`, `ws-default`
+- **Session isolation**: every presenter gets a unique `?session=<id>`; all
+  queries/broadcasts are scoped to it.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `wheel-logic.js` | Pure functions + constants: `getSlotAngle`, `getWinnerIndex`, `simulateDeceleration`, `COLORS`, `FRICTION`, `MIN/MAX_VELOCITY`, `STOP_THRESHOLD` |
-| `index.html` | Canvas wheel, orange arrow, SPIN button, friction animation loop (imports the module) |
-| `wheel-logic.test.js` | Unit tests (Node built-in test runner) |
+| `index.html` | Presenter wheel: QR code, live WebSocket wheel, SPIN, winner broadcast |
+| `register.html` | Participant form (session-scoped, validation, duplicate rejection, locks on success) |
+| `wheel-logic.js` | Pure functions/constants (`getSlotAngle`, `getWinnerIndex`, `simulateDeceleration`, ...) |
+| `config.js` | Runtime API URLs — overwritten at deploy time with SAM outputs |
+| `vendor/qrcode-generator.js` | Vendored MIT QR encoder (Kazuhiko Arase) |
+| `template.yaml` | SAM infrastructure (tables, 4 Lambdas, REST + WebSocket APIs, least-privilege IAM) |
+| `src/` | Lambda handlers + shared lib + AWS SDK wrappers + tests |
 
-## Tests
+## Run the tests
 
 ```bash
-node --test
+node --test          # frontend logic
+cd src && node --test # backend helpers   (or: node --test from repo root runs both)
 ```
+
+## Validate & build the infrastructure
+
+```bash
+sam validate --lint
+sam build
+```
+
+## Deploy
+
+See `deploy.sh` (or paste it into AWS CloudShell). It:
+1. `sam build && sam deploy` the backend
+2. reads `RestApiUrl` / `WebSocketUrl` from the stack outputs
+3. writes them into `config.js`
+4. uploads the static site (S3 + CloudFront)
 
 ## Spec-driven
 
-Built spec-first. See [`.kiro/specs/spinning-wheel/`](.kiro/specs/spinning-wheel/):
-
-- `requirements.md` — requirements in EARS format
-- `design.md` — architecture, friction physics, winner-detection formula
-- `tasks.md` — implementation plan
+Built spec-first — see [`.kiro/specs/spinning-wheel/`](.kiro/specs/spinning-wheel/):
+`requirements.md` (14 requirements), `design.md` (architecture, flows, data models,
+message formats), `tasks.md` (implementation plan).
