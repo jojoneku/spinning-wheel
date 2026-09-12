@@ -14,6 +14,7 @@ const {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand,
 } = require("@aws-sdk/client-apigatewaymanagementapi");
+const { createLogger } = require("./logger");
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
@@ -109,7 +110,9 @@ function apiClient(endpointOverride) {
   });
 }
 
-// Post a message to one connection; on 410 Gone, clean up the stale record.
+// Post a message to one connection; on a gone connection, clean up the stale
+// record. AWS SDK v3 surfaces this as a named `GoneException`; the 410
+// statusCode / $metadata checks are retained as a fallback for older shapes.
 async function postToConnection(client, sessionId, connectionId, payload) {
   try {
     await client.send(
@@ -120,21 +123,40 @@ async function postToConnection(client, sessionId, connectionId, payload) {
     );
     return true;
   } catch (err) {
-    if (err.statusCode === 410 || err.$metadata?.httpStatusCode === 410) {
+    if (
+      err.name === "GoneException" ||
+      err.statusCode === 410 ||
+      err.$metadata?.httpStatusCode === 410
+    ) {
       await removeConnection(sessionId, connectionId);
       return false;
     }
+    // Not a gone connection: rethrow so broadcast's per-connection handling
+    // can log it without aborting the rest of the batch.
     throw err;
   }
 }
 
-// Broadcast a payload to every connection in a session.
+// Broadcast a payload to every connection in a session. Uses Promise.allSettled
+// so one failing connection never aborts delivery to the others; non-gone
+// errors are logged and swallowed per connection.
 async function broadcast(sessionId, payload, endpointOverride) {
   const client = apiClient(endpointOverride);
   const connections = await listConnections(sessionId);
-  await Promise.all(
+  const logger = createLogger({ sessionId });
+  const results = await Promise.allSettled(
     connections.map((c) => postToConnection(client, sessionId, c, payload))
   );
+  results.forEach((r, i) => {
+    if (r.status === "rejected") {
+      const err = r.reason || {};
+      logger.error("broadcast_error", "post to connection failed", {
+        connectionId: connections[i],
+        name: err.name,
+        errorMessage: err.message,
+      });
+    }
+  });
 }
 
 module.exports = {

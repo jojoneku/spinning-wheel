@@ -10,3 +10,6 @@ package-lock.json
 
 # OS
 .DS_Store
+
+# Planner/agent scratch artifacts
+.agents/

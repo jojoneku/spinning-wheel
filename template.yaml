@@ -20,6 +20,9 @@ Globals:
     MemorySize: 128
     Architectures:
       - arm64
+    Tags:
+      Project: spinning-wheel
+      Environment: production
 
 Resources:
 
@@ -40,6 +43,11 @@ Resources:
           KeyType: HASH
         - AttributeName: name
           KeyType: RANGE
+      Tags:
+        - Key: Project
+          Value: spinning-wheel
+        - Key: Environment
+          Value: production
 
   ConnectionsTable:
     Type: AWS::DynamoDB::Table
@@ -57,6 +65,11 @@ Resources:
           KeyType: HASH
         - AttributeName: connectionId
           KeyType: RANGE
+      Tags:
+        - Key: Project
+          Value: spinning-wheel
+        - Key: Environment
+          Value: production
 
   # ---------------- WebSocket API ----------------
   WebSocketApi:

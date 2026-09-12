@@ -74,7 +74,14 @@ I appear on the wheel.
 
 #### Acceptance Criteria
 1. WHEN `register.html?session=<id>` loads THEN the system SHALL show a name input and a submit button.
-2. WHEN a name is submitted THEN the system SHALL validate it is non-empty and within a max length (e.g. 1–30 chars) after trimming.
+2. WHEN a name is submitted THEN the system SHALL validate it is non-empty and within a max length after trimming.
+
+> **Name-length reconciliation (see Requirement 18):** This criterion originally
+> specified a 1–30 char range and the code used `MAX_NAME_LENGTH = 30`. The
+> Well-Architected hardening standardizes the maximum on **50 characters**, which
+> is now authoritative. Read every reference to a 30-char limit in these original
+> requirements as **50 chars** (1–50 chars after trimming). `register.html` input
+> `maxlength` and its client-side guard follow the same 50-char limit.
 3. WHEN a duplicate name (case-insensitive) already exists in that session THEN the system SHALL reject it with a clear message.
 4. WHEN registration succeeds THEN the form SHALL lock (disable input/button) and show a confirmation.
 5. WHEN registration fails validation THEN the form SHALL remain editable and show the error.
@@ -130,3 +137,104 @@ I appear on the wheel.
 1. WHEN no names are registered THEN the wheel SHALL show an empty/placeholder state and SPIN SHALL be disabled.
 2. WHEN the WebSocket drops THEN the client SHALL auto-reconnect with backoff and re-sync on reconnect.
 3. WHEN names arrive via `new_name`/`sync` THEN the wheel SHALL redraw without a full page reload.
+
+---
+
+## New Requirements — Well-Architected Hardening
+
+These requirements harden the application against the five pillars of the AWS
+Well-Architected Framework (Operational Excellence, Security, Reliability,
+Performance Efficiency, Cost Optimization). They are additive: the Original
+Requirements and Real-Time Self-Registration requirements above still hold, with
+the single reconciliation noted under Requirement 8 (name length is now 50).
+
+### Requirement 15 — Operational Excellence: structured JSON logging
+**User Story:** As an operator, I want searchable structured logs, so that I can
+diagnose issues in CloudWatch without parsing free-form text.
+
+#### Acceptance Criteria
+1. WHEN any of the four Lambda handlers (`ws-connect`, `ws-disconnect`, `register`, `ws-default`) handles an event THEN it SHALL emit logs as single-line JSON via `console.log`.
+2. WHEN a log line is emitted THEN it SHALL include the fields `timestamp`, `level`, `requestId`, `sessionId`, `action`, and `message`, plus any handler-specific `...extra` fields.
+3. WHEN a handler starts, succeeds, or fails THEN it SHALL emit at least one log line at the appropriate level (`INFO`, `WARN`, or `ERROR`).
+4. WHEN the logger is constructed THEN it SHALL bind the current `requestId` and `sessionId` so every subsequent line is correlated to that invocation.
+
+### Requirement 16 — Security: CORS restricted to the CloudFront origin
+**User Story:** As a security owner, I want the REST API to accept browser calls
+only from our own site, so that other origins cannot abuse it.
+
+#### Acceptance Criteria
+1. WHEN the SAM template is deployed THEN it SHALL expose an `AllowedOrigin` parameter that defaults to `'*'` and is intended to be set to the CloudFront distribution URL in production.
+2. WHEN the REST API responds THEN its CORS `AllowOrigin` SHALL be driven by the `AllowedOrigin` parameter.
+3. WHEN the `register` handler returns any response (success or error) THEN its `Access-Control-Allow-Origin` header SHALL reflect the configured origin, supplied via an `ALLOWED_ORIGIN` environment variable.
+4. WHEN `AllowedOrigin` is set to a specific origin THEN requests from other origins SHALL NOT receive permissive CORS headers.
+
+### Requirement 17 — Security: WAF rate limiting
+**User Story:** As a security owner, I want registration flooding blocked, so
+that a single IP cannot overwhelm the API.
+
+#### Acceptance Criteria
+1. WHEN the infrastructure is deployed THEN it SHALL include a `AWS::WAFv2::WebACL` with `Scope: REGIONAL` containing a rate-based rule.
+2. WHEN the rate-based rule evaluates traffic THEN it SHALL limit to **100 requests per 5 minutes per source IP** and block requests over that limit.
+3. WHEN the WebACL is created THEN a `AWS::WAFv2::WebACLAssociation` SHALL attach it to the REST API stage.
+4. WHEN an IP exceeds the limit THEN further requests from that IP SHALL be blocked until the window resets.
+
+### Requirement 18 — Security: name length validation (max 50)
+**User Story:** As a security owner, I want a bounded name length, so that
+oversized inputs cannot be stored or broadcast.
+
+#### Acceptance Criteria
+1. WHEN a name is validated THEN the maximum length SHALL be **50 characters** after trimming (`MAX_NAME_LENGTH = 50`), which is authoritative over the earlier 30-char limit.
+2. WHEN a submitted name exceeds 50 chars after trimming THEN the API SHALL reject it with HTTP 400.
+3. WHEN `register.html` renders THEN its name input SHALL set `maxlength="50"` and its client-side guard SHALL reject names longer than 50 chars.
+4. WHEN the reconciliation is applied THEN no requirement in this document SHALL continue to assert a 30-char limit (see the note under Requirement 8).
+
+### Requirement 19 — Security: WebSocket session ID required
+**User Story:** As a security owner, I want to reject connections without a
+session, so that no orphaned connections accumulate.
+
+#### Acceptance Criteria
+1. WHEN a client attempts `$connect` without a `sessionId` query parameter THEN the `ws-connect` handler SHALL refuse the connection (return a non-2xx status) and SHALL NOT store a connection record.
+2. WHEN a connection is refused for a missing `sessionId` THEN the handler SHALL emit a `WARN`-level structured log line describing the refusal.
+3. WHEN this behavior is implemented THEN it SHALL be covered by a unit test asserting that a missing `sessionId` is rejected.
+
+### Requirement 20 — Security: DynamoDB encryption at rest (explicit SSE)
+**User Story:** As a security owner, I want encryption at rest to be explicit,
+so that our posture is auditable and unambiguous.
+
+#### Acceptance Criteria
+1. WHEN each DynamoDB table (`Registrations`, `Connections`) is defined THEN it SHALL declare an `SSESpecification` with `SSEEnabled: true`.
+2. WHEN the template is linted THEN the explicit SSE configuration SHALL be present and valid.
+
+### Requirement 21 — Reliability: broadcast resilience
+**User Story:** As a presenter, I want one dead connection to never abort a whole
+broadcast, so that live updates always reach the healthy clients.
+
+#### Acceptance Criteria
+1. WHEN a broadcast posts to multiple connections THEN each `postToConnection` SHALL be isolated so a failure on one connection does not prevent posting to the others (e.g. via `Promise.allSettled`).
+2. WHEN a `postToConnection` fails with a gone connection THEN the stale connection SHALL be detected via `err.name === 'GoneException'` (with `err.statusCode`/`err.$metadata.httpStatusCode === 410` as a fallback) and its record SHALL be deleted.
+3. WHEN a `postToConnection` fails with any other error THEN that error SHALL be logged and the broadcast loop SHALL continue with the remaining connections.
+
+### Requirement 22 — Reliability: WebSocket health-check ping
+**User Story:** As a presenter, I want stale WebSocket connections detected early,
+so that the wheel keeps receiving live updates after network blips.
+
+#### Acceptance Criteria
+1. WHEN the presenter WebSocket client is connected THEN it SHALL send a `{ "action": "ping" }` message every **30 seconds**.
+2. WHEN the server receives a `ping` action THEN the `ws-default` handler SHALL reply to that connection with `{ "type": "pong" }`.
+3. WHEN the client sends a ping AND does not receive a `pong` within **5 seconds** THEN it SHALL close the socket and trigger its reconnect logic.
+
+### Requirement 23 — Performance Efficiency: bundle QR library locally
+**User Story:** As a presenter on a locked-down network, I want no external CDN
+dependency, so that the QR code always renders.
+
+#### Acceptance Criteria
+1. WHEN the QR code is generated THEN the QR library SHALL be served from a local vendored file (no external CDN `<script src>`).
+2. WHEN `index.html` loads THEN it SHALL reference the local vendored QR library rather than a CDN URL.
+
+### Requirement 24 — Cost Optimization: cost allocation tags
+**User Story:** As a cost owner, I want resources tagged, so that spend is
+trackable in Cost Explorer.
+
+#### Acceptance Criteria
+1. WHEN Lambda functions are defined THEN they SHALL carry the tags `Project: spinning-wheel` and `Environment: production` (via `Globals.Function.Tags`).
+2. WHEN each DynamoDB table (`Registrations`, `Connections`) is defined THEN it SHALL carry the same `Project: spinning-wheel` and `Environment: production` tags.

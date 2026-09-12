@@ -6,15 +6,20 @@
 
 const aws = require("./aws");
 const { messages } = require("./lib");
+const { createLogger } = require("./logger");
 
 exports.handler = async (event) => {
   const connectionId = event.requestContext.connectionId;
   const endpoint = process.env.WS_ENDPOINT;
+  const requestId = event.requestContext && event.requestContext.requestId;
 
   let msg = {};
   try {
     msg = event.body ? JSON.parse(event.body) : {};
   } catch {
+    createLogger({ requestId }).warn("default", "invalid JSON body", {
+      connectionId,
+    });
     return { statusCode: 400, body: "invalid JSON" };
   }
 
@@ -23,7 +28,23 @@ exports.handler = async (event) => {
     event.queryStringParameters && event.queryStringParameters.session;
   const sessionId = msg.sessionId || qsSession;
 
-  if (!sessionId) return { statusCode: 400, body: "sessionId required" };
+  const logger = createLogger({ requestId, sessionId });
+
+  if (!sessionId) {
+    logger.warn("default", "missing sessionId", { action, connectionId });
+    return { statusCode: 400, body: "sessionId required" };
+  }
+
+  logger.info("default", "action received", { action, connectionId });
+
+  if (action === "ping") {
+    // Health-check: reply to just this caller with a pong. No broadcast.
+    const client = aws.apiClient(endpoint);
+    await aws.postToConnection(client, sessionId, connectionId, {
+      type: "pong",
+    });
+    return { statusCode: 200, body: "pong" };
+  }
 
   if (action === "sync") {
     const names = await aws.listNames(sessionId);

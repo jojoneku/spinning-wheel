@@ -8,17 +8,31 @@ REGION="${AWS_REGION:-us-east-1}"
 STAMP="$(date +%s)"
 BUCKET="spinning-wheel-site-${STAMP}"
 
+# Optional CORS origin override. If you already know the CloudFront (or custom)
+# origin, set ALLOWED_ORIGIN=https://... and it is passed to the initial deploy
+# so the REST API is locked to that origin from the start. On a fresh first run
+# the origin is not known yet (the CloudFront distribution is created later in
+# this script), so leave it empty: the initial deploy uses the template default
+# ("*") and step 6 below re-deploys to pin the real CloudFront origin.
+ALLOWED_ORIGIN="${ALLOWED_ORIGIN:-}"
+
 echo ">> Stack: $STACK | Region: $REGION | Site bucket: $BUCKET"
 
 # ---- 1. Build & deploy the SAM backend ----
 sam build
-sam deploy \
-  --stack-name "$STACK" \
-  --region "$REGION" \
-  --resolve-s3 \
-  --capabilities CAPABILITY_IAM \
-  --no-confirm-changeset \
+DEPLOY_ARGS=(
+  --stack-name "$STACK"
+  --region "$REGION"
+  --resolve-s3
+  --capabilities CAPABILITY_IAM
+  --no-confirm-changeset
   --no-fail-on-empty-changeset
+)
+if [ -n "$ALLOWED_ORIGIN" ]; then
+  echo ">> Pinning CORS AllowedOrigin=$ALLOWED_ORIGIN on initial deploy"
+  DEPLOY_ARGS+=(--parameter-overrides "AllowedOrigin=$ALLOWED_ORIGIN")
+fi
+sam deploy "${DEPLOY_ARGS[@]}"
 
 # ---- 2. Read stack outputs ----
 REST_URL=$(aws cloudformation describe-stacks --stack-name "$STACK" --region "$REGION" \
@@ -51,7 +65,7 @@ upload index.html    "text/html"
 upload register.html "text/html"
 upload wheel-logic.js "text/javascript"
 upload config.js      "text/javascript"
-aws s3 cp vendor/qrcode-generator.js "s3://$BUCKET/vendor/qrcode-generator.js" --content-type "text/javascript"
+aws s3 cp vendor/qrcode.min.js "s3://$BUCKET/vendor/qrcode.min.js" --content-type "text/javascript"
 
 OAC_ID=$(aws cloudfront create-origin-access-control \
   --origin-access-control-config \
@@ -94,6 +108,37 @@ cat > /tmp/policy.json <<EOF
 }]}
 EOF
 aws s3api put-bucket-policy --bucket "$BUCKET" --policy file:///tmp/policy.json
+
+# ---- 5. Pin CORS to the CloudFront origin ----
+# The template default AllowedOrigin is "*" (dev convenience). Now that the
+# distribution exists and $DIST_DOM is known, run a lightweight re-deploy to
+# lock the REST API CORS to the real CloudFront origin. Skipped if the caller
+# already pinned ALLOWED_ORIGIN on the initial deploy above.
+if [ -z "$ALLOWED_ORIGIN" ]; then
+  echo ">> Pinning CORS AllowedOrigin=https://${DIST_DOM} (re-deploy)"
+  sam deploy \
+    --stack-name "$STACK" \
+    --region "$REGION" \
+    --resolve-s3 \
+    --capabilities CAPABILITY_IAM \
+    --no-confirm-changeset \
+    --no-fail-on-empty-changeset \
+    --parameter-overrides "AllowedOrigin=https://${DIST_DOM}"
+fi
+
+# ---- 6. Invalidate the CloudFront cache ----
+# After re-uploading the static site, CloudFront may still serve stale objects
+# from its edge caches. Invalidate everything so the new files are served.
+# Prefer an existing distribution id from the environment (CF_DIST_ID / SW_DIST)
+# when re-deploying against an already-provisioned distribution; otherwise fall
+# back to the id of the distribution just created above.
+INVALIDATE_DIST="${CF_DIST_ID:-${SW_DIST:-$DIST_ID}}"
+if [ -n "$INVALIDATE_DIST" ]; then
+  echo ">> Requesting CloudFront invalidation for $INVALIDATE_DIST (/*)"
+  # Gated on a non-empty id above; `|| true` keeps a benign invalidation
+  # failure from aborting the whole script under `set -euo pipefail`.
+  aws cloudfront create-invalidation --distribution-id "$INVALIDATE_DIST" --paths '/*' || true
+fi
 
 echo ""
 echo "==================================================================="
